@@ -1,0 +1,175 @@
+---
+- name: "Create Mysql Folder"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0750
+  with_items:
+    - "{{ mysql_datadir }}"
+    - "{{ install_tmp }}"
+
+
+- name: "Set Selinux Mode"
+  selinux:
+    policy: targeted
+    state: permissive
+  ignore_errors: true
+
+
+- name: "Remove Maria libs"
+  shell: "rpm -qa | grep mari | xargs rpm -e --nodeps > /dev/null 2>&1"
+  ignore_errors: true
+
+
+- name: "Clean YUM  Cache"
+  shell: "yum clean all"
+
+
+- name: "Install Mysql Server"
+  yum:
+    name:
+      - libaio 
+      - net-tools
+      - perl
+      - mysql-community-common
+      - mysql-community-libs
+      - mysql-community-client
+      - mysql-community-server
+    state: present
+    enablerepo: "YUM"
+    disablerepo: "*"
+
+
+- name: "Create Mysql Data Folder"
+  file:
+    dest: "{{ item }}"
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: 0750
+  with_items:
+    - "{{ mysql_datadir }}"
+
+
+- name: "Copy Myql Config File"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: mysql
+    group: mysql
+    mode: 0640
+  with_items:
+    - { src: 'my.cnf', dest: '/etc' }
+
+
+- name: "Copy Mysql Init Sql"
+  unarchive:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0640
+  with_items:
+    - { src: 'sql.tar.gz', dest: '{{ install_tmp }}' }
+
+
+- name: "Renew sys Setting"
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: yes
+    state: present
+    reload: yes
+  with_items:
+    - { name: 'net.ipv4.ip_nonlocal_bind', value: '1' }
+    - { name: 'fs.file-max', value: '5000000' }
+    - { name: 'fs.nr_open', value: '2000000' }
+    - { name: 'vm.swappiness', value: '0' }
+    - { name: 'net.ipv4.ip_forward', value: '1' }
+
+
+- name: "Add skip-grant-tables"
+  lineinfile:
+    path: /etc/my.cnf
+    insertafter: '^[mysqld]'  
+    line: "{{ item }}"
+    state: present
+  with_items:
+    - "skip-grant-tables"
+
+
+- name: "Init Mysql Server"
+  shell: "mysqld --initialize --user=mysql"
+
+
+- name: "Restart Mysql Server"
+  systemd:
+    name: "mysqld"
+    state: restarted
+    daemon_reload: yes
+    enabled: yes
+
+
+- name: "Set Mysql Passwd"
+  shell: >
+    mysql -u root -e "update mysql.user set authentication_string=password('{{ mysql_root_pwd }}') ,password_expired='N' where user='root' and host='localhost';" && \
+    mysql -u root -e "flush privileges" 
+
+
+- name: "Remove skip-grant-tables"
+  lineinfile:
+    path: /etc/my.cnf
+    line: "{{ item }}"
+    state: absent
+  with_items:
+    - "skip-grant-tables"
+
+
+- name: "Restart Mysql Server"
+  systemd:
+    name: "mysqld"
+    state: restarted
+    daemon_reload: yes
+    enabled: yes
+
+
+- name: "Create Zabbix User and Database"
+  shell: >
+    mysql -u root -p{{ mysql_root_pwd }} -e "CREATE DATABASE IF NOT EXISTS {{ zabbix_database }} DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;" && \
+    mysql -u root -p{{ mysql_root_pwd }} -e "GRANT ALL PRIVILEGES ON {{ zabbix_database }}.* TO {{ zabbix_user }}@'localhost' IDENTIFIED BY '{{ zabbix_user_pwd }}';" && \
+    mysql mysql -u root -p{{ mysql_root_pwd }} -e "GRANT ALL PRIVILEGES ON {{ zabbix_database }}.* TO {{ zabbix_user }}@{{ ansible_ssh_host }} IDENTIFIED BY '{{ zabbix_user_pwd }}';" && \
+    mysql -u root -p{{ mysql_root_pwd }} -e "GRANT ALL PRIVILEGES ON *.* TO root@'%' IDENTIFIED BY '{{ mysql_root_pwd }}';" && \
+    mysql -u root -p{{ mysql_root_pwd }} -e "FLUSH PRIVILEGES;"
+
+
+- name: "Exec Zabbix SQL"
+  shell: >
+    mysql -u root -p{{ mysql_root_pwd }}  -D {{ zabbix_database }} -e "source {{ install_tmp }}/schema.sql" && \
+    mysql -u root -p{{ mysql_root_pwd }}  -D {{ zabbix_database }} -e "source {{ install_tmp }}/images.sql" && \
+    mysql -u root -p{{ mysql_root_pwd }}  -D {{ zabbix_database }} -e "source {{ install_tmp }}/data.sql"   
+
+
+- name: "Start Firewalld"
+  systemd:
+    name: "firewalld"
+    state: started
+    daemon_reload: yes
+    enabled: yes
+
+
+- name: "Set Firewalld"
+  firewalld:
+    zone: public
+    port: "{{ item }}"
+    permanent: yes
+    immediate: yes
+    state: enabled
+  with_items:
+    - "3306/tcp"
+
+
+- name: "Remove Install Tmp Folder"
+  file:
+    path: "{{ install_tmp }}"
+    state: absent
+

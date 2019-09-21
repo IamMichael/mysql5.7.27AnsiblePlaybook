@@ -1,0 +1,30 @@
+- hosts: g_mysql
+  tasks:
+    - name: "Stop Service"
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      with_items:
+        - mysqld
+      ignore_errors: true
+
+
+    - name: "Remove Mysql"
+      yum:
+        name:
+          - mysql-community-*
+        state: absent
+      ignore_errors: true
+
+
+    - name: "Remove Mysql File"
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /etc/my.cnf
+        - "{{ mysql_datadir }}"
+        - /var/log/mysql.log
+        - /var/log/mysqld.log
+      ignore_errors: true
+

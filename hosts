@@ -1,0 +1,2 @@
+[g_mysql]
+h_mysql    ansible_ssh_host=192.168.1.101   ansible_ssh_pass="123456"  ansible_ssh_extra_args='-o StrictHostKeyChecking=no' 
