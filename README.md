@@ -1,2 +1,2 @@
-# mysql5.7.27AsiblePlaybook
-mysql 5.7.27 Asible Playbook 
+# mysql5.7.27AnsiblePlaybook
+mysql 5.7.27 Ansible Playbook 
